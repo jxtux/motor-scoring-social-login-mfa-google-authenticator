@@ -1,0 +1,454 @@
+{
+  "info": {
+    "_postman_id": "50e3b8cb-b329-4bd6-b686-3f246f50d205",
+    "name": "Motor Scoring Crediticio Hexagonal",
+    "description": "Mismo contrato para MongoDB (predeterminado) y H2. RF04, RF05 y RF06.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "00 - Health",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/actuator/health",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "actuator",
+            "health"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('Servicio UP', () => pm.expect(pm.response.json().status).to.eql('UP'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "01 - RF04 Registrar solicitud",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/solicitudes-credito",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "solicitudes-credito"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"identificadorExterno\": \"{{identificadorExterno}}\",\n  \"solicitante\": {\n    \"tipoDocumento\": \"DNI\",\n    \"numeroDocumento\": \"{{numeroDocumento}}\",\n    \"nombresRazonSocial\": \"Persona de prueba\",\n    \"ingresosMensuales\": 5500,\n    \"gastosMensuales\": 1800,\n    \"obligacionesFinancieras\": 700,\n    \"antiguedadLaboralNegocio\": 36,\n    \"numeroObligacionesActivas\": 2,\n    \"puntajeHistorialPagos\": 85,\n    \"alertasMora\": 0\n  },\n  \"codigoProducto\": \"PRESTAMO_PERSONAL\",\n  \"montoSolicitado\": 15000,\n  \"plazoSolicitado\": 24,\n  \"moneda\": \"PEN\",\n  \"finalidadCredito\": \"Consumo\",\n  \"canalOrigen\": \"POSTMAN\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const now = Date.now();",
+              "pm.collectionVariables.set('identificadorExterno', `POSTMAN-${now}`);",
+              "pm.collectionVariables.set('numeroDocumento', String(10000000 + (now % 89999999)).slice(0, 8));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+              "const json = pm.response.json();",
+              "pm.test('Estado REGISTRADA', () => pm.expect(json.estado).to.eql('REGISTRADA'));",
+              "pm.collectionVariables.set('idSolicitud', json.idSolicitud);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 - RF05/RF06 Evaluar solicitud",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/solicitudes-credito/{{idSolicitud}}/evaluar",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "solicitudes-credito",
+            "{{idSolicitud}}",
+            "evaluar"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "const json = pm.response.json();",
+              "pm.test('Puntaje 989', () => pm.expect(json.puntajeTotal).to.eql(989));",
+              "pm.test('Resultado PREAPROBADA', () => pm.expect(json.resultado).to.eql('PREAPROBADA'));",
+              "pm.test('Versión 1.1.0', () => pm.expect(json.versionModelo).to.eql('1.1.0'));",
+              "pm.test('Nueve factores', () => pm.expect(json.factores).to.have.lengthOf(9));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 - Error evaluación duplicada",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/solicitudes-credito/{{idSolicitud}}/evaluar",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "solicitudes-credito",
+            "{{idSolicitud}}",
+            "evaluar"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
+              "pm.test('DUPLICATE_APPLICATION', () => pm.expect(pm.response.json().code).to.eql('DUPLICATE_APPLICATION'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 - Error identificador externo duplicado",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/solicitudes-credito",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "solicitudes-credito"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"identificadorExterno\": \"{{identificadorExterno}}\",\n  \"solicitante\": {\n    \"tipoDocumento\": \"DNI\",\n    \"numeroDocumento\": \"{{numeroDocumento}}\",\n    \"nombresRazonSocial\": \"Persona de prueba\",\n    \"ingresosMensuales\": 5500,\n    \"gastosMensuales\": 1800,\n    \"obligacionesFinancieras\": 700,\n    \"antiguedadLaboralNegocio\": 36,\n    \"numeroObligacionesActivas\": 2,\n    \"puntajeHistorialPagos\": 85,\n    \"alertasMora\": 0\n  },\n  \"codigoProducto\": \"PRESTAMO_PERSONAL\",\n  \"montoSolicitado\": 15000,\n  \"plazoSolicitado\": 24,\n  \"moneda\": \"PEN\",\n  \"finalidadCredito\": \"Consumo\",\n  \"canalOrigen\": \"POSTMAN\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 409', () => pm.response.to.have.status(409));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 - Error path inválido",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/solicitudes-credito/abc/evaluar",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "solicitudes-credito",
+            "abc",
+            "evaluar"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+              "pm.test('INVALID_PATH_PARAMETER', () => pm.expect(pm.response.json().code).to.eql('INVALID_PATH_PARAMETER'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 - Error solicitud inexistente",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/solicitudes-credito/999999999/evaluar",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "solicitudes-credito",
+            "999999999",
+            "evaluar"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 404', () => pm.response.to.have.status(404));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "07 - Registrar monto fuera de política",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/solicitudes-credito",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "solicitudes-credito"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"identificadorExterno\": \"{{invalidIdentificadorExterno}}\",\n  \"solicitante\": {\n    \"tipoDocumento\": \"DNI\",\n    \"numeroDocumento\": \"{{invalidNumeroDocumento}}\",\n    \"nombresRazonSocial\": \"Persona de prueba\",\n    \"ingresosMensuales\": 5500,\n    \"gastosMensuales\": 1800,\n    \"obligacionesFinancieras\": 700,\n    \"antiguedadLaboralNegocio\": 36,\n    \"numeroObligacionesActivas\": 2,\n    \"puntajeHistorialPagos\": 85,\n    \"alertasMora\": 0\n  },\n  \"codigoProducto\": \"PRESTAMO_PERSONAL\",\n  \"montoSolicitado\": 90000,\n  \"plazoSolicitado\": 24,\n  \"moneda\": \"PEN\",\n  \"finalidadCredito\": \"Consumo\",\n  \"canalOrigen\": \"POSTMAN\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const now = Date.now();",
+              "pm.collectionVariables.set('invalidIdentificadorExterno', `INVALID-${now}`);",
+              "pm.collectionVariables.set('invalidNumeroDocumento', String(20000000 + (now % 79999999)).slice(0, 8));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+              "pm.collectionVariables.set('invalidIdSolicitud', pm.response.json().idSolicitud);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "08 - RF05 rechaza monto fuera de política",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/solicitudes-credito/{{invalidIdSolicitud}}/evaluar",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "solicitudes-credito",
+            "{{invalidIdSolicitud}}",
+            "evaluar"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 422', () => pm.response.to.have.status(422));",
+              "pm.test('BUSINESS_VALIDATION_ERROR', () => pm.expect(pm.response.json().code).to.eql('BUSINESS_VALIDATION_ERROR'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "09 - Registrar solicitud con mora",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/solicitudes-credito",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "solicitudes-credito"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"identificadorExterno\": \"{{moraIdentificadorExterno}}\",\n  \"solicitante\": {\n    \"tipoDocumento\": \"DNI\",\n    \"numeroDocumento\": \"{{moraNumeroDocumento}}\",\n    \"nombresRazonSocial\": \"Persona de prueba\",\n    \"ingresosMensuales\": 5500,\n    \"gastosMensuales\": 1800,\n    \"obligacionesFinancieras\": 700,\n    \"antiguedadLaboralNegocio\": 36,\n    \"numeroObligacionesActivas\": 2,\n    \"puntajeHistorialPagos\": 85,\n    \"alertasMora\": 1\n  },\n  \"codigoProducto\": \"PRESTAMO_PERSONAL\",\n  \"montoSolicitado\": 15000,\n  \"plazoSolicitado\": 24,\n  \"moneda\": \"PEN\",\n  \"finalidadCredito\": \"Consumo\",\n  \"canalOrigen\": \"POSTMAN\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const now = Date.now();",
+              "pm.collectionVariables.set('moraIdentificadorExterno', `MORA-${now}`);",
+              "pm.collectionVariables.set('moraNumeroDocumento', String(30000000 + (now % 69999999)).slice(0, 8));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+              "pm.collectionVariables.set('moraIdSolicitud', pm.response.json().idSolicitud);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "10 - Regla excluyente por mora",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/solicitudes-credito/{{moraIdSolicitud}}/evaluar",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "solicitudes-credito",
+            "{{moraIdSolicitud}}",
+            "evaluar"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "const json=pm.response.json();",
+              "pm.test('Resultado RECHAZADA', () => pm.expect(json.resultado).to.eql('RECHAZADA'));",
+              "pm.test('Estado excluyente', () => pm.expect(json.estado).to.eql('CON_REGLA_EXCLUYENTE'));"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "idSolicitud",
+      "value": ""
+    },
+    {
+      "key": "identificadorExterno",
+      "value": ""
+    },
+    {
+      "key": "numeroDocumento",
+      "value": ""
+    }
+  ]
+}

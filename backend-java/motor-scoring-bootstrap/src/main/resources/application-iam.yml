@@ -1,0 +1,37 @@
+iam:
+  jwt:
+    issuer: ${IAM_JWT_ISSUER:finanscore}
+    audience: ${IAM_JWT_AUDIENCE:motor-scoring-api}
+    private-key: ${IAM_RSA_PRIVATE_KEY:/app/certs/iam-private.pem}
+    public-key: ${IAM_RSA_PUBLIC_KEY:/app/certs/iam-public.pem}
+    access-minutes: ${IAM_ACCESS_MINUTES:10}
+    refresh-days: ${IAM_REFRESH_DAYS:7}
+  verification:
+    # Puede ser el valor directamente o file:/ruta/al/secreto
+    pepper: ${IAM_VERIFICATION_PEPPER:file:/app/certs/iam-verification-pepper.txt}
+  totp:
+    issuer: ${IAM_TOTP_ISSUER:FinanScore}
+    # Puede ser Base64 directamente o file:/ruta/al/secreto
+    aes-key-base64: ${IAM_TOTP_AES_KEY:file:/app/certs/iam-totp-aes.key}
+  mail:
+    from: ${IAM_MAIL_FROM:no-reply@finanscore.local}
+  frontend:
+    social-callback: ${IAM_FRONTEND_SOCIAL_CALLBACK:http://localhost:4200/auth/social-callback}
+  refresh-cookie:
+    secure: ${IAM_REFRESH_COOKIE_SECURE:true}
+    same-site: ${IAM_REFRESH_COOKIE_SAME_SITE:None}
+  oauth:
+    tiktok:
+      client-key: ${TIKTOK_CLIENT_KEY:not-configured}
+      client-secret: ${TIKTOK_CLIENT_SECRET:not-configured}
+      redirect-uri: ${TIKTOK_REDIRECT_URI:https://localhost:8443/api/v1/auth/social/tiktok/callback}
+
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_CLIENT_ID:not-configured}
+            client-secret: ${GOOGLE_CLIENT_SECRET:not-configured}
+            scope: openid,profile,email

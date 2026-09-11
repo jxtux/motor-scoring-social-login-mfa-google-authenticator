@@ -1,0 +1,240 @@
+name: motor-scoring-kafka
+
+x-backend-common: &backend-common
+  build:
+    context: ./backend-java
+    dockerfile: Dockerfile
+  image: motor-scoring-backend:local
+  restart: unless-stopped
+  volumes:
+    - ./backend-java/docker/certs:/app/certs:ro
+  environment: &backend-env
+    POSTGRES_JDBC_URL: "jdbc:postgresql://postgres:5432/${POSTGRES_DB:-motor_scoring}?sslmode=verify-full&sslrootcert=/app/certs/ca.crt"
+    POSTGRES_USER: ${POSTGRES_USER:-motor_scoring}
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-motor_scoring}
+    KAFKA_BOOTSTRAP_SERVERS: "kafka:29092"
+    KAFKA_SECURITY_PROTOCOL: SASL_SSL
+    KAFKA_SASL_MECHANISM: SCRAM-SHA-512
+    KAFKA_TRUSTSTORE_LOCATION: /app/certs/client.truststore.jks
+    KAFKA_TRUSTSTORE_PASSWORD: ${DEV_CERT_PASSWORD:-changeit}
+    GMAIL_USERNAME: ${GMAIL_USERNAME:-}
+    GMAIL_APP_PASSWORD: ${GMAIL_APP_PASSWORD:-}
+
+    # IAM / OAuth / JWT. TLS + RSA + secretos TOTP locales se generan con scripts/generate-dev-certs.sh.
+    IAM_RSA_PRIVATE_KEY: ${IAM_RSA_PRIVATE_KEY:-/app/certs/iam-private.pem}
+    IAM_RSA_PUBLIC_KEY: ${IAM_RSA_PUBLIC_KEY:-/app/certs/iam-public.pem}
+    IAM_TOTP_AES_KEY: ${IAM_TOTP_AES_KEY:-file:/app/certs/iam-totp-aes.key}
+    IAM_VERIFICATION_PEPPER: ${IAM_VERIFICATION_PEPPER:-file:/app/certs/iam-verification-pepper.txt}
+    IAM_MAIL_FROM: ${IAM_MAIL_FROM:-no-reply@finanscore.local}
+    IAM_FRONTEND_SOCIAL_CALLBACK: ${IAM_FRONTEND_SOCIAL_CALLBACK:-http://localhost:4200/auth/social-callback}
+    IAM_REFRESH_COOKIE_SECURE: ${IAM_REFRESH_COOKIE_SECURE:-true}
+    IAM_REFRESH_COOKIE_SAME_SITE: ${IAM_REFRESH_COOKIE_SAME_SITE:-None}
+    GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-not-configured}
+    GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-not-configured}
+    TIKTOK_CLIENT_KEY: ${TIKTOK_CLIENT_KEY:-not-configured}
+    TIKTOK_CLIENT_SECRET: ${TIKTOK_CLIENT_SECRET:-not-configured}
+    TIKTOK_REDIRECT_URI: ${TIKTOK_REDIRECT_URI:-https://localhost:8443/api/v1/auth/social/tiktok/callback}
+
+    KAFKA_CONCURRENCY: "1"
+
+services:
+  postgres:
+    build:
+      context: ./backend-java
+      dockerfile: docker/postgres/Dockerfile
+    image: motor-scoring-postgres:local
+    container_name: motor-scoring-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-motor_scoring}
+      POSTGRES_USER: ${POSTGRES_USER:-motor_scoring}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-motor_scoring}
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    command: ["postgres"]
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend-java/docker/certs:/cert-source:ro
+      - ./backend-java/docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-motor_scoring} -d ${POSTGRES_DB:-motor_scoring}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  kafka:
+    build:
+      context: ./backend-java
+      dockerfile: docker/kafka/Dockerfile
+    image: motor-scoring-kafka:local
+    container_name: motor-scoring-kafka
+    environment:
+      KAFKA_CLUSTER_ID: ${KAFKA_CLUSTER_ID:-MkU3OEVBNTcwNTJENDM2Qk}
+      KAFKA_SSL_KEYSTORE_PASSWORD: ${DEV_CERT_PASSWORD:-changeit}
+      KAFKA_SSL_KEY_PASSWORD: ${DEV_CERT_PASSWORD:-changeit}
+      KAFKA_SSL_TRUSTSTORE_PASSWORD: ${DEV_CERT_PASSWORD:-changeit}
+      KAFKA_ADMIN_PASSWORD: ${KAFKA_ADMIN_PASSWORD:-AdminKafka2026}
+      KAFKA_BROKER_PASSWORD: ${KAFKA_BROKER_PASSWORD:-BrokerKafka2026}
+      KAFKA_API_PASSWORD: ${KAFKA_API_PASSWORD:-ApiKafka2026}
+      KAFKA_OUTBOX_PASSWORD: ${KAFKA_OUTBOX_PASSWORD:-OutboxKafka2026}
+      KAFKA_PAYMENT_PASSWORD: ${KAFKA_PAYMENT_PASSWORD:-PaymentKafka2026}
+      KAFKA_SCORING_PASSWORD: ${KAFKA_SCORING_PASSWORD:-ScoringKafka2026}
+      KAFKA_DELIVERY_PASSWORD: ${KAFKA_DELIVERY_PASSWORD:-DeliveryKafka2026}
+      KAFKA_DLT_PASSWORD: ${KAFKA_DLT_PASSWORD:-DltKafka2026}
+      KAFKA_UI_PASSWORD: ${KAFKA_UI_PASSWORD:-UiKafka2026}
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+      - ./backend-java/docker/certs:/etc/kafka/secrets:ro
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server kafka:29092 --command-config /etc/kafka/client/admin.properties >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 40
+
+  kafka-init:
+    image: motor-scoring-kafka:local
+    container_name: motor-scoring-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/opt/kafka/init-topics-acls.sh"]
+    environment:
+      KAFKA_ADMIN_PASSWORD: ${KAFKA_ADMIN_PASSWORD:-AdminKafka2026}
+      KAFKA_SSL_TRUSTSTORE_PASSWORD: ${DEV_CERT_PASSWORD:-changeit}
+    volumes:
+      - ./backend-java/docker/certs:/etc/kafka/secrets:ro
+    restart: "no"
+
+  motor-scoring-api:
+    <<: *backend-common
+    container_name: motor-scoring-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    ports:
+      - "8443:8443"
+    environment:
+      <<: *backend-env
+      SPRING_PROFILES_ACTIVE: postgres,api
+      KAFKA_USERNAME: motor-scoring-api
+      KAFKA_PASSWORD: ${KAFKA_API_PASSWORD:-ApiKafka2026}
+      SERVER_PORT: "8443"
+      SERVER_SSL_ENABLED: "true"
+      SERVER_SSL_KEY_STORE: /app/certs/api-keystore.p12
+      SERVER_SSL_KEY_STORE_PASSWORD: ${DEV_CERT_PASSWORD:-changeit}
+      CORS_ALLOWED_ORIGIN: http://localhost:4200
+    healthcheck:
+      test: ["CMD-SHELL", "curl -ksf https://localhost:8443/actuator/health | grep -q UP"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+
+  outbox-publisher:
+    <<: *backend-common
+    container_name: outbox-publisher
+    depends_on:
+      motor-scoring-api:
+        condition: service_healthy
+    environment:
+      <<: *backend-env
+      SPRING_PROFILES_ACTIVE: postgres,outbox-publisher
+      SPRING_MAIN_WEB_APPLICATION_TYPE: none
+      SPRING_FLYWAY_ENABLED: "false"
+      KAFKA_USERNAME: outbox-publisher
+      KAFKA_PASSWORD: ${KAFKA_OUTBOX_PASSWORD:-OutboxKafka2026}
+
+  payment-consumer:
+    <<: *backend-common
+    depends_on:
+      motor-scoring-api:
+        condition: service_healthy
+    environment:
+      <<: *backend-env
+      SPRING_PROFILES_ACTIVE: postgres,payment-consumer
+      SPRING_MAIN_WEB_APPLICATION_TYPE: none
+      SPRING_FLYWAY_ENABLED: "false"
+      KAFKA_USERNAME: payment-validation
+      KAFKA_PASSWORD: ${KAFKA_PAYMENT_PASSWORD:-PaymentKafka2026}
+
+  scoring-consumer:
+    <<: *backend-common
+    depends_on:
+      motor-scoring-api:
+        condition: service_healthy
+    environment:
+      <<: *backend-env
+      SPRING_PROFILES_ACTIVE: postgres,scoring-consumer
+      SPRING_MAIN_WEB_APPLICATION_TYPE: none
+      SPRING_FLYWAY_ENABLED: "false"
+      KAFKA_USERNAME: scoring-calculation
+      KAFKA_PASSWORD: ${KAFKA_SCORING_PASSWORD:-ScoringKafka2026}
+
+  credit-score-delivery-consumer:
+    <<: *backend-common
+    depends_on:
+      motor-scoring-api:
+        condition: service_healthy
+    environment:
+      <<: *backend-env
+      SPRING_PROFILES_ACTIVE: postgres,delivery-consumer
+      SPRING_MAIN_WEB_APPLICATION_TYPE: none
+      SPRING_FLYWAY_ENABLED: "false"
+      KAFKA_USERNAME: credit-score-delivery
+      KAFKA_PASSWORD: ${KAFKA_DELIVERY_PASSWORD:-DeliveryKafka2026}
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: motor-scoring-kafka-ui
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    ports:
+      - "8085:8080"
+    volumes:
+      - ./backend-java/docker/certs:/etc/kafka/secrets:ro
+    environment:
+      KAFKA_CLUSTERS_0_NAME: motor-scoring
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_PROPERTIES_SECURITY_PROTOCOL: SASL_SSL
+      KAFKA_CLUSTERS_0_PROPERTIES_SASL_MECHANISM: SCRAM-SHA-512
+      KAFKA_CLUSTERS_0_PROPERTIES_SASL_JAAS_CONFIG: 'org.apache.kafka.common.security.scram.ScramLoginModule required username="kafka-ui" password="${KAFKA_UI_PASSWORD:-UiKafka2026}";'
+      KAFKA_CLUSTERS_0_PROPERTIES_SSL_TRUSTSTORE_LOCATION: /etc/kafka/secrets/client.truststore.jks
+      KAFKA_CLUSTERS_0_PROPERTIES_SSL_TRUSTSTORE_PASSWORD: ${DEV_CERT_PASSWORD:-changeit}
+      KAFKA_CLUSTERS_0_PROPERTIES_SSL_TRUSTSTORE_TYPE: JKS
+
+  frontend-angular:
+    build:
+      context: ./frontend-angular
+      dockerfile: Dockerfile
+    image: motor-scoring-angular:local
+    container_name: motor-scoring-angular
+    depends_on:
+      motor-scoring-api:
+        condition: service_healthy
+    ports:
+      - "4200:80"
+
+  dlt-reprocessor:
+    <<: *backend-common
+    profiles: ["tools"]
+    restart: "no"
+    depends_on:
+      motor-scoring-api:
+        condition: service_healthy
+    environment:
+      <<: *backend-env
+      SPRING_PROFILES_ACTIVE: postgres,dlt-reprocessor
+      SPRING_MAIN_WEB_APPLICATION_TYPE: none
+      SPRING_FLYWAY_ENABLED: "false"
+      KAFKA_USERNAME: dlt-reprocessor
+      KAFKA_PASSWORD: ${KAFKA_DLT_PASSWORD:-DltKafka2026}
+      DEMO_DLT_TOPIC: ${DEMO_DLT_TOPIC:-}
+      DEMO_DLT_EVENT_ID: ${DEMO_DLT_EVENT_ID:-}
+
+volumes:
+  postgres_data:
+  kafka_data:

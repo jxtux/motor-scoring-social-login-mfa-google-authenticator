@@ -1,0 +1,101 @@
+<div class="app-shell">
+  <div class="app-topbar" role="banner">
+    <div class="app-topbar-inner">
+      <div class="app-brand-inline">
+        <span class="app-brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 64 64">
+            <path d="M14 40a18 18 0 1 1 36 0" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
+            <path d="M32 40 44 27" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
+            <circle cx="32" cy="40" r="4.5" fill="currentColor"/>
+          </svg>
+        </span>
+        <span>Motor Scoring</span>
+      </div>
+
+      <div class="app-user-menu">
+        <div class="app-user-copy" *ngIf="currentUser as user">
+          <strong>{{ user.displayName }}</strong>
+          <span *ngIf="user.email">{{ user.email }}</span>
+        </div>
+        <div class="app-user-copy" *ngIf="!currentUser">
+          <strong>Usuario autenticado</strong>
+          <span>Cargando perfil…</span>
+        </div>
+        <button class="logout-button" type="button" (click)="cerrarSesion()" [disabled]="logoutLoading" title="Cerrar sesión">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M10 5H6.8A1.8 1.8 0 0 0 5 6.8v10.4A1.8 1.8 0 0 0 6.8 19H10"/>
+            <path d="M14 8l4 4-4 4M18 12H9"/>
+          </svg>
+          <span>{{ logoutLoading ? 'Cerrando…' : 'Cerrar sesión' }}</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <main class="container">
+    <header>
+      <span class="eyebrow">Motor de Scoring Crediticio</span>
+      <h1>Solicita tu evaluación crediticia</h1>
+      <p>Registra los datos y recibirás el resultado con un informe PDF en el correo indicado.</p>
+    </header>
+
+    <section *ngIf="!confirmacion" class="card">
+      <form [formGroup]="form" (ngSubmit)="enviar()">
+        <p class="demo-note">Datos de demostración precargados. El correo destinatario es dinámico: ingresa aquí la dirección real donde deseas recibir el informe PDF.</p>
+        <h2>Datos personales</h2>
+        <div class="grid">
+          <label>Tipo de documento<select formControlName="tipoDocumento"><option>DNI</option><option>RUC</option><option>CE</option><option>PASAPORTE</option></select></label>
+          <label>Número de documento<input formControlName="numeroDocumento"></label>
+          <label class="wide">Nombre / razón social<input formControlName="nombresRazonSocial"></label>
+          <label class="wide">Correo donde recibirá el informe PDF<input type="email" formControlName="correoElectronico" placeholder="usuario@correo.com"></label>
+        </div>
+
+        <h2>Información financiera</h2>
+        <div class="grid">
+          <label>Ingresos mensuales<input type="number" formControlName="ingresosMensuales"></label>
+          <label>Gastos mensuales<input type="number" formControlName="gastosMensuales"></label>
+          <label>Obligaciones financieras<input type="number" formControlName="obligacionesFinancieras"></label>
+          <label>Antigüedad (meses)<input type="number" formControlName="antiguedadLaboralNegocio"></label>
+          <label>Obligaciones activas<input type="number" formControlName="numeroObligacionesActivas"></label>
+          <label>Historial de pagos (0-100)<input type="number" formControlName="puntajeHistorialPagos"></label>
+          <label>Alertas de mora<input type="number" formControlName="alertasMora"></label>
+        </div>
+
+        <h2>Servicio solicitado</h2>
+        <div class="grid">
+          <label>Producto<input formControlName="codigoProducto"></label>
+          <label>Monto solicitado<input type="number" formControlName="montoSolicitado"></label>
+          <label>Plazo (meses)<input type="number" formControlName="plazoSolicitado"></label>
+          <label>Moneda<select formControlName="moneda"><option>PEN</option></select></label>
+          <label class="wide">Finalidad<input formControlName="finalidadCredito"></label>
+        </div>
+
+        <h2>Validación de pago simulada</h2>
+        <div class="grid">
+          <label>Banco<select formControlName="banco"><option>BCP</option><option>BBVA</option><option>INTERBANK</option></select></label>
+          <label>Número de operación<input formControlName="numeroOperacion"></label>
+          <label>Monto pagado<input type="number" formControlName="montoPagado"></label>
+          <label>Moneda<select formControlName="monedaPago"><option>PEN</option></select></label>
+          <label>Fecha de pago<input type="date" formControlName="fechaPago"></label>
+        </div>
+
+        <p class="error" *ngIf="error">{{ error }}</p>
+        <button type="submit" [disabled]="enviando">{{ enviando ? 'Registrando...' : 'Enviar solicitud' }}</button>
+      </form>
+    </section>
+
+    <section *ngIf="confirmacion as c" class="card confirmation">
+      <div class="check">✓</div>
+      <h2>Solicitud registrada</h2>
+      <p>{{ c.mensaje }}</p>
+      <dl>
+        <dt>Solicitud</dt><dd>{{ c.solicitudScoringId }}</dd>
+        <dt>Estado</dt><dd>{{ c.estado }}</dd>
+        <dt>Correo</dt><dd>{{ c.correoElectronico }}</dd>
+        <dt>Banco</dt><dd>{{ c.banco }}</dd>
+        <dt>Operación</dt><dd>{{ c.numeroOperacion }}</dd>
+      </dl>
+      <button type="button" (click)="nueva()">Registrar otra solicitud</button>
+    </section>
+  </main>
+</div>

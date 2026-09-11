@@ -1,0 +1,234 @@
+openapi: 3.0.3
+info:
+  title: Motor de Scoring Crediticio API
+  version: 2.0.2
+  description: >-
+    API RF04, RF05 y RF06 con Arquitectura Hexagonal. MongoDB es el
+    adaptador de salida predeterminado; H2/JPA se activa con el profile h2.
+servers:
+  - url: http://localhost:8080
+paths:
+  /api/solicitudes-credito:
+    post:
+      summary: RF04 - Registrar solicitud de crédito
+      operationId: registrarSolicitudCredito
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CrearSolicitudCreditoRequest'
+            example:
+              identificadorExterno: POSTMAN-2026-000001
+              solicitante:
+                tipoDocumento: DNI
+                numeroDocumento: '12345678'
+                nombresRazonSocial: Persona de prueba
+                ingresosMensuales: 5500
+                gastosMensuales: 1800
+                obligacionesFinancieras: 700
+                antiguedadLaboralNegocio: 36
+                numeroObligacionesActivas: 2
+                puntajeHistorialPagos: 85
+                alertasMora: 0
+              codigoProducto: PRESTAMO_PERSONAL
+              montoSolicitado: 15000
+              plazoSolicitado: 24
+              moneda: PEN
+              finalidadCredito: Consumo
+              canalOrigen: POSTMAN
+      responses:
+        '201':
+          description: Solicitud registrada
+          headers:
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SolicitudCreditoResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/BusinessError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/solicitudes-credito/{id}/evaluar:
+    post:
+      summary: RF05/RF06 - Validar y calcular scoring
+      operationId: evaluarSolicitudCredito
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        '200':
+          description: Evaluación calculada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvaluacionScoringResponse'
+              example:
+                idEvaluacion: 1
+                idSolicitud: 1
+                puntajeTotal: 989
+                resultado: PREAPROBADA
+                estado: COMPLETADA
+                versionModelo: 1.1.0
+                fechaEvaluacion: '2026-07-27T15:00:00'
+                factores: []
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/BusinessError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+components:
+  responses:
+    BadRequest:
+      description: Request, formato o path inválido
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Recurso no encontrado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: Recurso o evaluación duplicada
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    BusinessError:
+      description: Validación de negocio incumplida
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    InternalError:
+      description: Error inesperado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    SolicitanteRequest:
+      type: object
+      required: [tipoDocumento, numeroDocumento, nombresRazonSocial, ingresosMensuales, gastosMensuales, obligacionesFinancieras]
+      properties:
+        tipoDocumento:
+          type: string
+          enum: [DNI, CE, PASAPORTE, RUC]
+        numeroDocumento:
+          type: string
+        nombresRazonSocial:
+          type: string
+        ingresosMensuales:
+          type: number
+        gastosMensuales:
+          type: number
+          minimum: 0
+        obligacionesFinancieras:
+          type: number
+          minimum: 0
+        antiguedadLaboralNegocio:
+          type: integer
+          minimum: 0
+        numeroObligacionesActivas:
+          type: integer
+          minimum: 0
+        puntajeHistorialPagos:
+          type: integer
+          minimum: 0
+          maximum: 100
+        alertasMora:
+          type: integer
+          minimum: 0
+    CrearSolicitudCreditoRequest:
+      type: object
+      required: [identificadorExterno, solicitante, codigoProducto, montoSolicitado, plazoSolicitado, moneda, finalidadCredito, canalOrigen]
+      properties:
+        identificadorExterno:
+          type: string
+        solicitante:
+          $ref: '#/components/schemas/SolicitanteRequest'
+        codigoProducto:
+          type: string
+        montoSolicitado:
+          type: number
+          minimum: 0.01
+        plazoSolicitado:
+          type: integer
+          minimum: 1
+        moneda:
+          type: string
+          enum: [PEN, USD]
+        finalidadCredito:
+          type: string
+        canalOrigen:
+          type: string
+    SolicitudCreditoResponse:
+      type: object
+      properties:
+        idSolicitud: {type: integer, format: int64}
+        idSolicitante: {type: integer, format: int64}
+        identificadorExterno: {type: string}
+        codigoProducto: {type: string}
+        montoSolicitado: {type: number}
+        plazoSolicitado: {type: integer}
+        moneda: {type: string}
+        estado: {type: string, example: REGISTRADA}
+        fechaRegistro: {type: string, format: date-time}
+    ResultadoFactorResponse:
+      type: object
+      properties:
+        factor: {type: string}
+        valorEvaluado: {type: number}
+        pesoAplicado: {type: number}
+        puntajeBase: {type: integer}
+        puntajeObtenido: {type: integer}
+        reglaAplicada: {type: string}
+        observacion: {type: string}
+        excluyente: {type: boolean}
+    EvaluacionScoringResponse:
+      type: object
+      properties:
+        idEvaluacion: {type: integer, format: int64}
+        idSolicitud: {type: integer, format: int64}
+        puntajeTotal: {type: integer, minimum: 0, maximum: 1000}
+        resultado:
+          type: string
+          enum: [PREAPROBADA, REVISION_MANUAL, RECHAZADA]
+        estado: {type: string}
+        versionModelo: {type: string}
+        fechaEvaluacion: {type: string, format: date-time}
+        factores:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResultadoFactorResponse'
+    ErrorResponse:
+      type: object
+      properties:
+        timestamp: {type: string, format: date-time}
+        status: {type: integer}
+        code: {type: string}
+        message: {type: string}
+        path: {type: string}
+        violations:
+          type: object
+          additionalProperties: {type: string}

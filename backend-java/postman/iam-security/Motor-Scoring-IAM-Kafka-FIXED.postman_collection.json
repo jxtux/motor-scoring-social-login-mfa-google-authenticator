@@ -1,0 +1,666 @@
+{
+  "info": {
+    "_postman_id": "0da0f383-1cc7-464d-b612-21289b0f7fca",
+    "name": "Motor Scoring Crediticio - IAM + JWT + Kafka (FIXED)",
+    "description": "Colección para el proyecto Motor Scoring Crediticio.\n\nIncluye:\n- Health y OpenAPI.\n- Registro/local login, verificación de correo, MFA TOTP, JWT, refresh token y logout.\n- Inicio de OAuth/OIDC con Google y OAuth2 con TikTok.\n- Solicitud asíncrona de scoring (Outbox + Kafka).\n- Endpoints RF04/RF05/RF06 existentes.\n\nIMPORTANTE: el proyecto usa HTTPS local con certificado de desarrollo. En Postman importa la CA local o desactiva temporalmente 'SSL certificate verification' solo para desarrollo.\n\nEl refresh token se recibe como cookie HttpOnly `fs_refresh`. Postman lo conserva en su cookie jar y lo envía automáticamente a /api/v1/auth/refresh y /logout.\n\nGoogle/TikTok requieren interacción del usuario en navegador; los requests de Social Login sirven para comprobar/iniciar la redirección, pero el consentimiento real se completa en el navegador.\n\nLos endpoints IAM corresponden a la capa de seguridad preparada para integrar sobre el proyecto. Si ejecutas únicamente el ZIP original sin la integración IAM, esos endpoints devolverán 404 hasta aplicar dicha integración.\n\nVersión corregida: las URLs están almacenadas como string para que Postman las muestre correctamente al importar.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const now = new Date();",
+          "pm.environment.set('today', now.toISOString().slice(0, 10));",
+          "if (!pm.environment.get('uniqueSuffix')) {",
+          "  pm.environment.set('uniqueSuffix', String(Date.now()));",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "00 - Sistema",
+      "description": "Comprobaciones básicas del backend.",
+      "item": [
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/actuator/health",
+            "description": "Comprueba que Spring Boot está levantado.\n\nEste request es GET y no necesita Body.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('UP', () => pm.expect(j.status).to.eql('UP'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "OpenAPI JSON",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v3/api-docs",
+            "description": "Contrato OpenAPI generado por Springdoc.\n\nEste request es GET y no necesita Body.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "01 - Autenticación local + MFA",
+      "description": "Secuencia recomendada: Register → Verify Email → MFA Setup → MFA Confirm → Login → MFA Verify. Después usa Refresh y Logout. Introduce manualmente `verificationCode` (correo) y `totpCode` (Google Authenticator) en el environment.",
+      "item": [
+        {
+          "name": "1. Registrar usuario",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/auth/register",
+            "description": "Crea un usuario o reanuda un registro local incompleto con el mismo correo y contraseña. Devuelve nextStep=EMAIL_VERIFY o MFA_SETUP.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"displayName\": \"{{displayName}}\",\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const j = pm.response.json();",
+                  "if (j.token && j.nextStep === 'MFA_SETUP') pm.environment.set('setupToken', j.token);",
+                  "if (j.nextStep) pm.environment.set('authNextStep', j.nextStep);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. Verificar correo",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/auth/verify-email",
+            "description": "Valida el código de correo. Si es correcto, deja la cuenta en MFA_SETUP_REQUIRED y devuelve setupToken para mostrar el QR de Google Authenticator.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"code\": \"{{verificationCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "if (j.setupToken) pm.environment.set('setupToken', j.setupToken);",
+                  "if (j.nextStep) pm.environment.set('authNextStep', j.nextStep);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3. Configurar MFA - generar secreto/QR",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/auth/mfa/setup",
+            "description": "Genera el secreto TOTP y otpAuthUri. Escanea el otpAuthUri con Google Authenticator o usa el secreto para agregar la cuenta manualmente.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"setupToken\": \"{{setupToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "if (j.secret) pm.environment.set('totpSecret', j.secret);",
+                  "if (j.otpAuthUri) pm.environment.set('otpAuthUri', j.otpAuthUri);",
+                  "console.log('TOTP secret:', j.secret);",
+                  "console.log('otpauth URI:', j.otpAuthUri);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4. Confirmar MFA",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/auth/mfa/confirm",
+            "description": "Confirma el primer TOTP de Google Authenticator, activa la cuenta y devuelve Access JWT; el refresh token queda en cookie HttpOnly.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"setupToken\": \"{{setupToken}}\",\n  \"code\": \"{{totpCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "if (j.accessToken) pm.environment.set('accessToken', j.accessToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "5. Login usuario/contraseña",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/auth/login",
+            "description": "Valida usuario/contraseña. Si MFA está configurado devuelve token temporal con nextStep=MFA_VERIFY. Si aún no está configurado puede devolver nextStep=MFA_SETUP.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.environment.set('authNextStep', j.nextStep || '');",
+                  "if (j.nextStep === 'MFA_SETUP' && j.token) pm.environment.set('setupToken', j.token);",
+                  "if (j.nextStep === 'MFA_VERIFY' && j.token) pm.environment.set('challengeToken', j.token);",
+                  "console.log('Auth stage:', j);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6. Verificar MFA y obtener JWT",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/auth/mfa/verify",
+            "description": "Valida el TOTP. Devuelve el Access JWT y establece la cookie HttpOnly Secure `fs_refresh`. Postman guarda automáticamente esa cookie para el mismo host.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"challengeToken\": \"{{challengeToken}}\",\n  \"code\": \"{{totpCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "if (j.accessToken) {",
+                  "  pm.environment.set('accessToken', j.accessToken);",
+                  "  const parts = j.accessToken.split('.');",
+                  "  if (parts.length === 3) {",
+                  "    try {",
+                  "      let p = parts[1].replace(/-/g, '+').replace(/_/g, '/');",
+                  "      while (p.length % 4) p += '=';",
+                  "      const decoded = JSON.parse(atob(p));",
+                  "      pm.environment.set('jwtPayload', JSON.stringify(decoded));",
+                  "      console.log('JWT payload decodificado (NO cifrado):', decoded);",
+                  "    } catch (e) { console.log('No se pudo decodificar JWT en script:', e); }",
+                  "  }",
+                  "}",
+                  "if (j.expiresInSeconds !== undefined) pm.environment.set('accessExpiresInSeconds', String(j.expiresInSeconds));",
+                  "console.log('Set-Cookie:', pm.response.headers.get('Set-Cookie'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "7. Renovar Access JWT con Refresh Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/auth/refresh",
+            "description": "No envías el refresh token en JSON. Postman/navegador envía automáticamente la cookie HttpOnly `fs_refresh`. El backend valida su hash en sesiones_usuario, rota el refresh token y devuelve un nuevo Access JWT.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "if (j.accessToken) pm.environment.set('accessToken', j.accessToken);",
+                  "if (j.expiresInSeconds !== undefined) pm.environment.set('accessExpiresInSeconds', String(j.expiresInSeconds));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "8. Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/auth/logout",
+            "description": "Revoca la sesión asociada al refresh token y elimina la cookie `fs_refresh`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.environment.unset('accessToken');",
+                  "pm.environment.unset('jwtPayload');"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 - Social Login OAuth2 / OIDC",
+      "description": "Estos flujos son interactivos. Lo ideal es abrir las URLs en navegador. Google usa OAuth2 + OpenID Connect; TikTok Login Kit Web usa OAuth2.",
+      "item": [
+        {
+          "name": "Google - iniciar OAuth2/OIDC",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/oauth2/authorization/google",
+            "description": "Redirige a Google. El callback registrado debe coincidir con `{{baseUrl}}/login/oauth2/code/google`. Completa login/consentimiento en navegador.\n\nEste request es GET y no necesita Body.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "TikTok - iniciar OAuth2",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/auth/social/tiktok/start",
+            "description": "Genera state, guarda cookie HttpOnly de state y redirige a TikTok Login Kit. El callback esperado es `{{baseUrl}}/api/v1/auth/social/tiktok/callback`.\n\nEste request es GET y no necesita Body.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Google callback - referencia (no ejecutar manualmente)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/login/oauth2/code/google?code={{oauthAuthorizationCode}}&state={{oauthState}}",
+            "description": "Solo referencia. Google invoca este endpoint automáticamente con code/state.\n\nEste request es GET y no necesita Body.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "TikTok callback - referencia (no ejecutar manualmente)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/auth/social/tiktok/callback?code={{oauthAuthorizationCode}}&state={{oauthState}}",
+            "description": "Solo referencia. TikTok invoca este endpoint automáticamente; state debe coincidir con la cookie generada en /start.\n\nEste request es GET y no necesita Body.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "03 - Scoring asíncrono (Outbox + Kafka)",
+      "description": "Endpoint principal del flujo Kafka. Requiere Access JWT cuando IAM está integrado.",
+      "item": [
+        {
+          "name": "Registrar solicitud de scoring asíncrona",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/scoring-requests",
+            "description": "Registra la solicitud, persiste el workflow/outbox y responde 202. El Outbox Publisher publica posteriormente a Kafka.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"solicitante\": {\n    \"tipoDocumento\": \"DNI\",\n    \"numeroDocumento\": \"{{numeroDocumento}}\",\n    \"nombresRazonSocial\": \"{{nombresRazonSocial}}\",\n    \"correoElectronico\": \"{{email}}\",\n    \"ingresosMensuales\": 5500,\n    \"gastosMensuales\": 1800,\n    \"obligacionesFinancieras\": 700,\n    \"antiguedadLaboralNegocio\": 36,\n    \"numeroObligacionesActivas\": 2,\n    \"puntajeHistorialPagos\": 85,\n    \"alertasMora\": 0\n  },\n  \"solicitud\": {\n    \"codigoProducto\": \"PRESTAMO_PERSONAL\",\n    \"montoSolicitado\": 15000,\n    \"plazoSolicitado\": 24,\n    \"moneda\": \"PEN\",\n    \"finalidadCredito\": \"Consumo\"\n  },\n  \"pago\": {\n    \"banco\": \"BCP\",\n    \"numeroOperacion\": \"PAGO-POSTMAN-{{uniqueSuffix}}\",\n    \"montoPagado\": 30,\n    \"moneda\": \"PEN\",\n    \"fechaPago\": \"{{today}}\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 202', () => pm.response.to.have.status(202));",
+                  "const j = pm.response.json();",
+                  "if (j.solicitudScoringId) pm.environment.set('solicitudScoringId', j.solicitudScoringId);",
+                  "if (j.correlationId) pm.environment.set('correlationId', j.correlationId);",
+                  "console.log('Scoring aceptado:', j);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 - RF04 / RF05 / RF06 (flujo síncrono existente)",
+      "description": "Endpoints ya presentes en el proyecto original. Con IAM integrado quedan protegidos por JWT.",
+      "item": [
+        {
+          "name": "RF04 - Registrar solicitud de crédito",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/solicitudes-credito",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identificadorExterno\": \"POSTMAN-{{uniqueSuffix}}\",\n  \"solicitante\": {\n    \"tipoDocumento\": \"DNI\",\n    \"numeroDocumento\": \"{{numeroDocumento}}\",\n    \"nombresRazonSocial\": \"{{nombresRazonSocial}}\",\n    \"ingresosMensuales\": 5500,\n    \"gastosMensuales\": 1800,\n    \"obligacionesFinancieras\": 700,\n    \"antiguedadLaboralNegocio\": 36,\n    \"numeroObligacionesActivas\": 2,\n    \"puntajeHistorialPagos\": 85,\n    \"alertasMora\": 0\n  },\n  \"codigoProducto\": \"PRESTAMO_PERSONAL\",\n  \"montoSolicitado\": 15000,\n  \"plazoSolicitado\": 24,\n  \"moneda\": \"PEN\",\n  \"finalidadCredito\": \"Consumo\",\n  \"canalOrigen\": \"POSTMAN\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const j = pm.response.json();",
+                  "if (j.idSolicitud) pm.environment.set('idSolicitud', String(j.idSolicitud));",
+                  "console.log('Solicitud creada:', j);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "RF05/RF06 - Evaluar solicitud",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/solicitudes-credito/{{idSolicitud}}/evaluar",
+            "description": "Valida reglas de negocio, calcula el score y persiste la evaluación.\n\nNo necesita Body: usa {{idSolicitud}} en la URL."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "console.log('Evaluación:', pm.response.json());"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "05 - Utilidades / diagnóstico",
+      "description": "Requests útiles durante desarrollo.",
+      "item": [
+        {
+          "name": "Swagger UI (HTML)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/swagger-ui.html",
+            "description": "Swagger UI del backend.\n\nEste request es GET y no necesita Body.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Probar endpoint protegido sin JWT",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/scoring-requests",
+            "description": "Con IAM integrado debería ser rechazado por Spring Security antes de llegar al controller.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"solicitante\": {},\n  \"solicitud\": {},\n  \"pago\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
